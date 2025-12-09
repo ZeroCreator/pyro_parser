@@ -1,0 +1,7 @@
+__pycache__/
+.idea/
+*.csv
+*.json
+*.html
+*.xlsx
+/results
