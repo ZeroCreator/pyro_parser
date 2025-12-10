@@ -1,3 +1,3 @@
-from .excel_writer import create_excel_report
+# core/__init__.py
+from .excel_report import *
 
-__all__ = ['create_excel_report']

@@ -4,9 +4,10 @@ import json
 import os
 import re
 from datetime import datetime
-from typing import List, Dict, Set
+from typing import List, Dict
 from parser import YandexPyroParser
-from core.excel_writer import create_excel_report
+
+from core.excel_report import create_excel_report
 
 
 class PyroDatabase:
@@ -55,7 +56,6 @@ class PyroDatabase:
             if match:
                 return f"yandex_{match.group(1)}"
 
-        # Резервный вариант - хеш
         return f"hash_{hash(url) & 0xFFFFFFFF:08x}"
 
     def find_shop_by_id(self, shop_id: str) -> Dict:
@@ -64,11 +64,6 @@ class PyroDatabase:
             if shop.get("id") == shop_id:
                 return shop
         return None
-
-    def find_shop_by_url(self, url: str) -> Dict:
-        """Находим магазин по URL"""
-        shop_id = self.extract_id(url)
-        return self.find_shop_by_id(shop_id)
 
     def add_or_update_shop(self, shop_data: Dict) -> tuple:
         """
@@ -90,7 +85,7 @@ class PyroDatabase:
                 "Телефон": shop_data.get("Телефон", existing.get("Телефон", "")),
                 "Сайт": shop_data.get("Сайт", existing.get("Сайт", "")),
                 "Дата последнего обнаружения": current_time,
-                "обнаружен_в_последнем_парсинге": True
+                "Обнаружен_в_последнем_парсинге": True
             })
             return existing, False
 
@@ -106,7 +101,8 @@ class PyroDatabase:
                 "Город": shop_data.get("Город", "Ростов-на-Дону"),
                 "Дата добавления": current_time,
                 "Дата последнего обнаружения": current_time,
-                "обнаружен_в_последнем_парсинге": True
+                "Дата сбора": current_time,  # Для Excel отчета
+                "Обнаружен_в_последнем_парсинге": True
             }
 
             self.db["shops"].append(new_shop)
@@ -116,7 +112,7 @@ class PyroDatabase:
     def mark_all_unfound(self):
         """Помечаем все магазины как не найденные в текущем парсинге"""
         for shop in self.db.get("shops", []):
-            shop["обнаружен_в_последнем_парсинге"] = False
+            shop["Обнаружен_в_последнем_парсинге"] = False
 
     def get_new_shops(self) -> List[Dict]:
         """Получаем магазины, добавленные в последнем парсинге"""
@@ -124,14 +120,38 @@ class PyroDatabase:
         for shop in self.db.get("shops", []):
             # Магазин считается новым, если дата добавления = дате последнего обновления
             if shop.get("Дата добавления") == shop.get("Дата последнего обнаружения"):
-                new_shops.append(shop)
+                # Добавляем дату сбора для отчета
+                shop_with_date = shop.copy()
+                shop_with_date["Дата сбора"] = shop.get("Дата последнего обнаружения", "")
+                new_shops.append(shop_with_date)
         return new_shops
+
+    def get_all_shops_for_excel(self) -> List[Dict]:
+        """Получаем все магазины в формате для Excel"""
+        all_shops = []
+        for shop in self.db.get("shops", []):
+            # Форматируем для Excel
+            excel_shop = {
+                "Название магазина": shop.get("Название магазина", ""),
+                "Адрес": shop.get("Адрес", ""),
+                "Телефон": shop.get("Телефон", ""),
+                "Сайт": shop.get("Сайт", ""),
+                "Ссылка": shop.get("Ссылка", ""),
+                "Дата добавления": shop.get("Дата добавления", ""),
+                "Дата последнего обнаружения": shop.get("Дата последнего обнаружения", ""),
+                "Обнаружен_в_последнем_парсинге": shop.get("Обнаружен_в_последнем_парсинге", False)
+            }
+            all_shops.append(excel_shop)
+
+        # Сортируем по дате последнего обнаружения (новые сверху)
+        all_shops.sort(key=lambda x: x.get("Дата последнего обнаружения", ""), reverse=True)
+        return all_shops
 
     def get_stats(self) -> Dict:
         """Статистика базы"""
         total = self.db.get("total_shops", 0)
         found_in_last = sum(1 for s in self.db.get("shops", [])
-                            if s.get("обнаружен_в_последнем_парсинге", False))
+                            if s.get("Обнаружен_в_последнем_парсинге", False))
 
         return {
             "total_shops": total,
@@ -157,13 +177,13 @@ async def main():
     # 2. Парсим текущие данные
     print("\n🔍 Начинаем парсинг Яндекс Карт...")
     parser = YandexPyroParser(headless=False)  # False для отладки
-    current_shops = await parser.parse()
+    current_shops_data = await parser.parse()
 
-    if not current_shops:
+    if not current_shops_data:
         print("❌ Не удалось получить данные")
         return
 
-    print(f"✅ Найдено магазинов в текущем парсинге: {len(current_shops)}")
+    print(f"✅ Найдено магазинов в текущем парсинге: {len(current_shops_data)}")
 
     # 3. Обновляем базу данных
     print("\n💾 Обновляем базу данных...")
@@ -175,7 +195,7 @@ async def main():
     new_shops_count = 0
     updated_shops_count = 0
 
-    for shop_data in current_shops:
+    for shop_data in current_shops_data:
         shop, is_new = db.add_or_update_shop(shop_data)
         if is_new:
             new_shops_count += 1
@@ -189,73 +209,66 @@ async def main():
     print(f"   Новых магазинов: {new_shops_count}")
     print(f"   Обновленных магазинов: {updated_shops_count}")
 
-    # 4. Получаем новые магазины для отчета
+    # 4. Получаем данные для отчета
+    print("\n📊 Подготавливаем данные для отчета...")
+
+    # Новые магазины
     new_shops = db.get_new_shops()
 
-    # 5. Создаем отчеты
-    print("\n📊 Создаем отчеты...")
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+    # Все магазины (уже в формате для Excel)
+    all_shops_excel = db.get_all_shops_for_excel()
 
-    # Отчет 1: Новые магазины (всегда создаем)
-    if new_shops:
-        # Подготавливаем данные для Excel
-        excel_data = []
-        for shop in new_shops:
-            excel_data.append({
-                'Название магазина': shop.get('Название магазина', ''),
-                'Адрес': shop.get('Адрес', ''),
-                'Телефон': shop.get('Телефон', ''),
-                'Сайт': shop.get('Сайт', ''),
-                'Ссылка': shop.get('Ссылка', ''),
-                'Дата добавления': shop.get('Дата добавления', '')
-            })
-
-        excel_file = create_excel_report(
-            data=excel_data,
-            filename=f"новые_магазины_{timestamp}.xlsx"
-        )
-
-        print(f"✅ Отчет с новыми магазинами создан:")
-        print(f"   📄 {excel_file}")
-    else:
-        # Создаем пустой отчет
-        empty_data = [{
-            'Название магазина': 'Новых магазинов не обнаружено',
-            'Адрес': '',
-            'Телефон': '',
-            'Сайт': '',
-            'Ссылка': '',
-            'Дата добавления': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        }]
-
-        excel_file = create_excel_report(
-            data=empty_data,
-            filename=f"новые_магазины_{timestamp}.xlsx"
-        )
-        print(f"✅ Отчет создан: {excel_file}")
-        print("   ℹ️  Новых магазинов не обнаружено")
-
-    # Отчет 2: Полная выгрузка всех магазинов (опционально)
-    print("\n📋 Создаем полный отчет...")
-    all_shops_data = []
-    for shop in db.db.get("shops", []):
-        all_shops_data.append({
-            'Название магазина': shop.get('Название магазина', ''),
-            'Адрес': shop.get('Адрес', ''),
-            'Телефон': shop.get('Телефон', ''),
-            'Сайт': shop.get('Сайт', ''),
-            'Ссылка': shop.get('Ссылка', ''),
-            'Дата добавления': shop.get('Дата добавления', ''),
-            'Дата последнего обнаружения': shop.get('Дата последнего обнаружения', ''),
-            'В последнем парсинге': 'Да' if shop.get('обнаружен_в_последнем_парсинге') else 'Нет'
+    # Также можем получить текущие магазины для отчета
+    current_shops_for_excel = []
+    for shop_data in current_shops_data:
+        current_shops_for_excel.append({
+            "Название магазина": shop_data.get("Название магазина", ""),
+            "Адрес": shop_data.get("Адрес", ""),
+            "Телефон": shop_data.get("Телефон", ""),
+            "Сайт": shop_data.get("Сайт", ""),
+            "Ссылка": shop_data.get("Ссылка", ""),
+            "Дата сбора": shop_data.get("Дата сбора", ""),
+            "Город": shop_data.get("Город", "")
         })
 
-    all_excel_file = create_excel_report(
-        data=all_shops_data,
-        filename=f"все_магазины_{timestamp}.xlsx"
+    # 5. Создаем отчет с 4 вкладками
+    print("\n📄 Создаем отчет с 4 вкладками...")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+    filename = f"магазины_пиротехники_{timestamp}.xlsx"
+
+    # Получаем все магазины из базы для вкладки "Все магазины"
+    all_shops_from_db = db.get_all_shops_for_excel()
+
+    # Подготавливаем новые магазины для отчета
+    new_shops_for_excel = []
+    for shop in new_shops:
+        excel_shop = {
+            "Название магазина": shop.get("Название магазина", ""),
+            "Адрес": shop.get("Адрес", ""),
+            "Телефон": shop.get("Телефон", ""),
+            "Сайт": shop.get("Сайт", ""),
+            "Ссылка": shop.get("Ссылка", ""),
+            "Дата сбора": shop.get("Дата сбора", "")
+        }
+        new_shops_for_excel.append(excel_shop)
+
+    excel_file = create_excel_report(
+        new_shops=new_shops_for_excel,
+        parsed_shops=current_shops_for_excel,  # текущие спарсенные магазины
+        all_shops=all_shops_from_db,  # все магазины из базы
+        filename=filename
     )
-    print(f"✅ Полный отчет создан:")
-    print(f"   📄 {all_excel_file}")
+
+    if excel_file:
+        print(f"✅ Отчет успешно создан:")
+        print(f"   📄 {excel_file}")
+        print(f"   📊 Вкладки: 1) Новые магазины, 2) Все магазины, 3) Статистика")
+
+        # Выводим абсолютный путь
+        abs_path = os.path.abspath(excel_file)
+        print(f"   📍 Полный путь: {abs_path}")
+    else:
+        print("❌ Не удалось создать отчет")
 
     # 6. Выводим статистику
     print("\n" + "=" * 80)
@@ -265,18 +278,23 @@ async def main():
     final_stats = db.get_stats()
 
     print(f"🏪 Всего магазинов в базе: {final_stats['total_shops']}")
-    print(f"🆕 Новых магазинов в этом парсинге: {new_shops_count}")
+    print(f"🔍 Найдено в этом парсинге: {len(current_shops_data)}")
+    print(f"🆕 Новых магазинов: {new_shops_count}")
     print(f"🔄 Обновленных магазинов: {updated_shops_count}")
     print(f"📅 Дата парсинга: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
-    print(f"📁 База данных: data/database.json")
 
     if new_shops_count > 0:
         print("\n🎉 Обнаружены новые магазины:")
-        for i, shop in enumerate(new_shops, 1):
-            name = shop.get('Название магазина', 'Без названия')
-            address = shop.get('Адрес', '')
+        for i, shop in enumerate(new_shops[:5], 1):
+            name = shop.get('Название магазина', 'Без названия')[:40]
+            address = shop.get('Адрес', '')[:30]
             print(f"   {i}. {name}")
             print(f"      📍 {address}")
+
+        if len(new_shops) > 5:
+            print(f"      ... и еще {len(new_shops) - 5}")
+    else:
+        print("\nℹ️  Новых магазинов пиротехники не обнаружено.")
 
 
 if __name__ == "__main__":
