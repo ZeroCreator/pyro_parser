@@ -4,42 +4,29 @@ from typing import List, Dict
 
 
 def create_excel_report(new_shops: List[Dict],
-                                 parsed_shops: List[Dict],
-                                 all_shops: List[Dict],
-                                 filename: str = "результаты.xlsx") -> str:
+                        parsed_shops: List[Dict],
+                        all_shops: List[Dict],
+                        filename: str = "результаты.xlsx") -> str:
     """
-    Создает Excel файл с четырьмя вкладками:
-    1. Новые магазины
-    2. Спарсенные магазины (текущий парсинг)
-    3. Все магазины (из базы данных)
-    4. Статистика
+    Создает Excel файл с пятью вкладками:
+    1. Новые магазины (все новые)
+    2. Яндекс магазины (текущий парсинг)
+    3. 2GIS магазины (текущий парсинг)
+    4. Все магазины (из базы данных)
+    5. Статистика
 
-    Args:
-        new_shops: Список новых магазинов
-        parsed_shops: Список магазинов из текущего парсинга
-        all_shops: Список всех магазинов из базы данных
-        filename: Имя файла для сохранения
-
-    Returns:
-        str: Путь к созданному файлу
+    Если данные отсутствуют - вкладка будет создана с сообщением
     """
-    if not parsed_shops:
-        return ""
-
-    # Создаем папку results если ее нет
     results_dir = "results"
     if not os.path.exists(results_dir):
         os.makedirs(results_dir)
 
-    # Полный путь к файлу
     full_path = os.path.join(results_dir, filename)
 
     try:
-        # Создаем книгу Excel
         workbook = xlsxwriter.Workbook(full_path)
 
         # ========== СОЗДАНИЕ ФОРМАТОВ ==========
-        # Настраиваем форматы
         header_format = workbook.add_format({
             'bold': True,
             'bg_color': '#4F81BD',
@@ -66,317 +53,288 @@ def create_excel_report(new_shops: List[Dict],
             'text_wrap': True
         })
 
-        # Формат для выделения новых магазинов (зеленый)
         new_shop_format = workbook.add_format({
             'bold': True,
-            'bg_color': '#C6EFCE',  # Светло-зеленый
+            'bg_color': '#C6EFCE',
             'align': 'left',
             'valign': 'vcenter',
             'border': 1,
             'text_wrap': True
         })
 
-        # Формат для ссылок в новых магазинах
-        new_shop_url_format = workbook.add_format({
-            'font_color': 'blue',
-            'underline': 1,
-            'bg_color': '#C6EFCE',  # Светло-зеленый фон
+        yandex_format = workbook.add_format({
+            'bg_color': '#FFE699',
             'align': 'left',
             'valign': 'vcenter',
             'border': 1,
             'text_wrap': True
         })
 
-        # Формат для отсутствующих магазинов
-        missing_format = workbook.add_format({
-            'bg_color': '#FFC7CE',  # Светло-красный
+        gis_format = workbook.add_format({
+            'bg_color': '#B4C6E7',
             'align': 'left',
             'valign': 'vcenter',
             'border': 1,
             'text_wrap': True
         })
 
-        # Формат для неактивных магазинов
-        inactive_format = workbook.add_format({
-            'font_color': '#999999',
-            'align': 'left',
+        empty_format = workbook.add_format({
+            'bg_color': '#F2F2F2',
+            'align': 'center',
             'valign': 'vcenter',
             'border': 1,
-            'text_wrap': True
+            'text_wrap': True,
+            'italic': True
         })
 
         # ========== ВКЛАДКА 1: НОВЫЕ МАГАЗИНЫ ==========
-        headers_basic = ['№', 'Название магазина', 'Адрес', 'Телефон', 'Сайт', 'Ссылка', 'Дата сбора']
+        headers_new = ['№', 'Источник', 'Название магазина', 'Адрес', 'Телефон', 'Сайт', 'Ссылка', 'Дата сбора']
+        worksheet1 = workbook.add_worksheet('Новые магазины')
+
+        for col, header in enumerate(headers_new):
+            worksheet1.write(0, col, header, header_format)
 
         if new_shops:
-            worksheet1 = workbook.add_worksheet('Новые магазины')
-
-            # Записываем заголовки
-            for col, header in enumerate(headers_basic):
-                worksheet1.write(0, col, header, header_format)
-
-            # Записываем данные
             for row, shop in enumerate(new_shops, 1):
-                # Номер
-                worksheet1.write(row, 0, row, new_shop_format)
+                source = shop.get('Источник', 'unknown')
+                # Выбираем формат в зависимости от источника
+                if source == 'yandex':
+                    row_fmt = yandex_format
+                elif source == '2gis':
+                    row_fmt = gis_format
+                else:
+                    row_fmt = new_shop_format
 
-                # Название магазина
-                worksheet1.write(row, 1, shop.get('Название магазина', ''), new_shop_format)
+                worksheet1.write(row, 0, row, row_fmt)
+                worksheet1.write(row, 1, source, row_fmt)
+                worksheet1.write(row, 2, shop.get('Название магазина', ''), row_fmt)
+                worksheet1.write(row, 3, shop.get('Адрес', ''), row_fmt)
+                worksheet1.write(row, 4, shop.get('Телефон', ''), row_fmt)
 
-                # Адрес
-                worksheet1.write(row, 2, shop.get('Адрес', ''), new_shop_format)
-
-                # Телефон
-                worksheet1.write(row, 3, shop.get('Телефон', ''), new_shop_format)
-
-                # Сайт
                 website = shop.get('Сайт', '')
                 if website:
-                    worksheet1.write_url(row, 4, website, new_shop_url_format, website)
+                    worksheet1.write_url(row, 5, website, url_format, website)
                 else:
-                    worksheet1.write(row, 4, '', new_shop_format)
+                    worksheet1.write(row, 5, '', row_fmt)
 
-                # Ссылка
                 url = shop.get('Ссылка', '')
                 if url:
-                    worksheet1.write_url(row, 5, url, new_shop_url_format, url)
+                    worksheet1.write_url(row, 6, url, url_format, url)
                 else:
-                    worksheet1.write(row, 5, '', new_shop_format)
+                    worksheet1.write(row, 6, '', row_fmt)
 
-                # Дата сбора
-                worksheet1.write(row, 6, shop.get('Дата сбора', ''), new_shop_format)
-
-            # Настраиваем ширину колонок
-            worksheet1.set_column('A:A', 5)  # №
-            worksheet1.set_column('B:B', 30)  # Название
-            worksheet1.set_column('C:C', 40)  # Адрес
-            worksheet1.set_column('D:D', 25)  # Телефон
-            worksheet1.set_column('E:E', 30)  # Сайт
-            worksheet1.set_column('F:F', 60)  # Ссылка
-            worksheet1.set_column('G:G', 20)  # Дата сбора
-
-            # Добавляем фильтр
-            worksheet1.autofilter(0, 0, len(new_shops), len(headers_basic) - 1)
-            worksheet1.freeze_panes(1, 0)
-
-            # Добавляем информацию о количестве
-            worksheet1.write(len(new_shops) + 2, 0, f"Всего новых магазинов: {len(new_shops)}")
-
+                worksheet1.write(row, 7, shop.get('Дата сбора', ''), row_fmt)
         else:
-            # Если новых магазинов нет, создаем вкладку с сообщением
-            worksheet1 = workbook.add_worksheet('Новые магазины')
+            # Если нет новых магазинов
+            worksheet1.write(1, 0, 1, empty_format)
+            worksheet1.write(1, 1, 'Нет новых магазинов', empty_format)
+            worksheet1.merge_range(1, 2, 1, 7, 'В текущем парсинге не обнаружено новых магазинов', empty_format)
 
-            # Записываем заголовки
-            for col, header in enumerate(headers_basic):
-                worksheet1.write(0, col, header, header_format)
+        # Настройка ширины колонок
+        widths_new = [5, 10, 30, 40, 25, 30, 60, 20]
+        for i, width in enumerate(widths_new):
+            worksheet1.set_column(i, i, width)
 
-            # Сообщение об отсутствии новых магазинов
-            worksheet1.write(1, 0, 1, cell_format)
-            worksheet1.write(1, 1, 'Новых магазинов не обнаружено', cell_format)
+        # ========== ВКЛАДКА 2: ЯНДЕКС МАГАЗИНЫ ==========
+        headers_basic = ['№', 'Название магазина', 'Адрес', 'Телефон', 'Сайт', 'Ссылка', 'Дата сбора']
+        worksheet2 = workbook.add_worksheet('Яндекс магазины')
 
-            # Настраиваем ширину колонок
-            worksheet1.set_column('A:A', 5)
-            worksheet1.set_column('B:B', 30)
-            worksheet1.set_column('C:C', 40)
-            worksheet1.set_column('D:D', 25)
-            worksheet1.set_column('E:E', 30)
-            worksheet1.set_column('F:F', 60)
-            worksheet1.set_column('G:G', 20)
-
-        # ========== ВКЛАДКА 2: СПАРСЕННЫЕ МАГАЗИНЫ ==========
-        worksheet2 = workbook.add_worksheet('Спарсенные магазины')
-
-        # Записываем заголовки
         for col, header in enumerate(headers_basic):
             worksheet2.write(0, col, header, header_format)
 
-        # Записываем данные всех спарсенных магазинов
-        for row, shop in enumerate(parsed_shops, 1):
-            # Номер
-            worksheet2.write(row, 0, row, cell_format)
+        # Разделяем parsed_shops на Яндекс и 2GIS
+        yandex_shops = [shop for shop in parsed_shops if shop.get('Источник') == 'yandex']
+        two_gis_shops = [shop for shop in parsed_shops if shop.get('Источник') == '2gis']
 
-            # Название магазина
-            worksheet2.write(row, 1, shop.get('Название магазина', ''), cell_format)
+        if yandex_shops:
+            for row, shop in enumerate(yandex_shops, 1):
+                worksheet2.write(row, 0, row, yandex_format)
+                worksheet2.write(row, 1, shop.get('Название магазина', ''), yandex_format)
+                worksheet2.write(row, 2, shop.get('Адрес', ''), yandex_format)
+                worksheet2.write(row, 3, shop.get('Телефон', ''), yandex_format)
 
-            # Адрес
-            worksheet2.write(row, 2, shop.get('Адрес', ''), cell_format)
+                website = shop.get('Сайт', '')
+                if website:
+                    worksheet2.write_url(row, 4, website, url_format, website)
+                else:
+                    worksheet2.write(row, 4, '', yandex_format)
 
-            # Телефон
-            worksheet2.write(row, 3, shop.get('Телефон', ''), cell_format)
+                url = shop.get('Ссылка', '')
+                if url:
+                    worksheet2.write_url(row, 5, url, url_format, url)
+                else:
+                    worksheet2.write(row, 5, '', yandex_format)
 
-            # Сайт
-            website = shop.get('Сайт', '')
-            if website:
-                worksheet2.write_url(row, 4, website, url_format, website)
-            else:
-                worksheet2.write(row, 4, '', cell_format)
+                worksheet2.write(row, 6, shop.get('Дата сбора', ''), yandex_format)
 
-            # Ссылка
-            url = shop.get('Ссылка', '')
-            if url:
-                worksheet2.write_url(row, 5, url, url_format, url)
-            else:
-                worksheet2.write(row, 5, '', cell_format)
+            # Добавляем статистику по вкладке
+            total_row = len(yandex_shops) + 2
+            worksheet2.write(total_row, 0, f"Всего Яндекс магазинов: {len(yandex_shops)}")
+        else:
+            # Если нет Яндекс магазинов
+            worksheet2.write(1, 0, 1, empty_format)
+            worksheet2.write(1, 1, 'Нет данных', empty_format)
+            worksheet2.merge_range(1, 2, 1, 6, 'В текущем парсинге Яндекс не использовался или не дал результатов',
+                                   empty_format)
 
-            # Дата сбора
-            worksheet2.write(row, 6, shop.get('Дата сбора', ''), cell_format)
+        # Настройка ширины колонок
+        widths_basic = [5, 30, 40, 25, 30, 60, 20]
+        for i, width in enumerate(widths_basic):
+            worksheet2.set_column(i, i, width)
 
-        # Настраиваем ширину колонок
-        worksheet2.set_column('A:A', 5)  # №
-        worksheet2.set_column('B:B', 30)  # Название
-        worksheet2.set_column('C:C', 40)  # Адрес
-        worksheet2.set_column('D:D', 25)  # Телефон
-        worksheet2.set_column('E:E', 30)  # Сайт
-        worksheet2.set_column('F:F', 60)  # Ссылка
-        worksheet2.set_column('G:G', 20)  # Дата сбора
+        # ========== ВКЛАДКА 3: 2GIS МАГАЗИНЫ ==========
+        worksheet3 = workbook.add_worksheet('2GIS магазины')
 
-        # Добавляем фильтр
-        worksheet2.autofilter(0, 0, len(parsed_shops), len(headers_basic) - 1)
-        worksheet2.freeze_panes(1, 0)
-
-        # Добавляем информацию о количестве
-        worksheet2.write(len(parsed_shops) + 2, 0, f"Всего спарсено магазинов: {len(parsed_shops)}")
-
-        # ========== ВКЛАДКА 3: ВСЕ МАГАЗИНЫ ==========
-        # Дополнительные заголовки для всех магазинов
-        headers_all = ['№', 'Название магазина', 'Адрес', 'Телефон', 'Сайт', 'Ссылка',
-                       'Дата добавления', 'Дата последнего обнаружения', 'В последнем парсинге', 'Статус']
-
-        worksheet3 = workbook.add_worksheet('Все магазины')
-
-        # Записываем заголовки
-        for col, header in enumerate(headers_all):
+        for col, header in enumerate(headers_basic):
             worksheet3.write(0, col, header, header_format)
 
-        # Создаем множество ссылок новых магазинов для выделения
-        new_shops_links = {shop.get('Ссылка', '') for shop in new_shops}
-        parsed_shops_links = {shop.get('Ссылка', '') for shop in parsed_shops}
+        if two_gis_shops:
+            for row, shop in enumerate(two_gis_shops, 1):
+                worksheet3.write(row, 0, row, gis_format)
+                worksheet3.write(row, 1, shop.get('Название магазина', ''), gis_format)
+                worksheet3.write(row, 2, shop.get('Адрес', ''), gis_format)
+                worksheet3.write(row, 3, shop.get('Телефон', ''), gis_format)
 
-        # Записываем данные всех магазинов
-        for row, shop in enumerate(all_shops, 1):
-            # Определяем статус магазина
-            shop_link = shop.get('Ссылка', '')
-            in_parsed = shop_link in parsed_shops_links
-            is_new = shop_link in new_shops_links
-
-            # Выбираем формат в зависимости от статуса
-            if not in_parsed:
-                row_format = missing_format
-                status = "Отсутствует"
-            elif is_new:
-                row_format = new_shop_format
-                status = "Новый"
-            else:
-                row_format = cell_format
-                status = "В базе"
-
-            # Номер
-            worksheet3.write(row, 0, row, row_format)
-
-            # Название магазина
-            worksheet3.write(row, 1, shop.get('Название магазина', ''), row_format)
-
-            # Адрес
-            worksheet3.write(row, 2, shop.get('Адрес', ''), row_format)
-
-            # Телефон
-            worksheet3.write(row, 3, shop.get('Телефон', ''), row_format)
-
-            # Сайт
-            website = shop.get('Сайт', '')
-            if website:
-                # Используем соответствующий формат для ссылок
-                if not in_parsed:
-                    url_fmt = missing_format
-                elif is_new:
-                    url_fmt = new_shop_url_format
+                website = shop.get('Сайт', '')
+                if website:
+                    worksheet3.write_url(row, 4, website, url_format, website)
                 else:
-                    url_fmt = url_format
-                worksheet3.write_url(row, 4, website, url_fmt, website)
-            else:
-                worksheet3.write(row, 4, '', row_format)
+                    worksheet3.write(row, 4, '', gis_format)
 
-            # Ссылка
-            url = shop.get('Ссылка', '')
-            if url:
-                worksheet3.write_url(row, 5, url, url_format, url)
-            else:
-                worksheet3.write(row, 5, '', row_format)
+                url = shop.get('Ссылка', '')
+                if url:
+                    worksheet3.write_url(row, 5, url, url_format, url)
+                else:
+                    worksheet3.write(row, 5, '', gis_format)
 
-            # Дата добавления
-            worksheet3.write(row, 6, shop.get('Дата добавления', ''), row_format)
+                worksheet3.write(row, 6, shop.get('Дата сбора', ''), gis_format)
 
-            # Дата последнего обнаружения
-            worksheet3.write(row, 7, shop.get('Дата последнего обнаружения', ''), row_format)
+            # Добавляем статистику по вкладке
+            total_row = len(two_gis_shops) + 2
+            worksheet3.write(total_row, 0, f"Всего 2GIS магазинов: {len(two_gis_shops)}")
+        else:
+            # Если нет 2GIS магазинов
+            worksheet3.write(1, 0, 1, empty_format)
+            worksheet3.write(1, 1, 'Нет данных', empty_format)
+            worksheet3.merge_range(1, 2, 1, 6, 'В текущем парсинге 2GIS не использовался или не дал результатов',
+                                   empty_format)
 
-            # В последнем парсинге
-            in_last = "Да" if shop.get('обнаружен_в_последнем_парсинге') else "Нет"
-            worksheet3.write(row, 8, in_last, row_format)
+        # Настройка ширины колонок
+        for i, width in enumerate(widths_basic):
+            worksheet3.set_column(i, i, width)
 
-            # Статус
-            worksheet3.write(row, 9, status, row_format)
+        # ========== ВКЛАДКА 4: ВСЕ МАГАЗИНЫ ==========
+        headers_all = ['№', 'Источник', 'Название магазина', 'Адрес', 'Телефон', 'Сайт', 'Ссылка',
+                       'Дата добавления', 'Дата последнего обнаружения', 'В последнем парсинге']
 
-        # Настраиваем ширину колонок
-        worksheet3.set_column('A:A', 5)  # №
-        worksheet3.set_column('B:B', 30)  # Название
-        worksheet3.set_column('C:C', 40)  # Адрес
-        worksheet3.set_column('D:D', 25)  # Телефон
-        worksheet3.set_column('E:E', 30)  # Сайт
-        worksheet3.set_column('F:F', 60)  # Ссылка
-        worksheet3.set_column('G:G', 20)  # Дата добавления
-        worksheet3.set_column('H:H', 25)  # Дата последнего обнаружения
-        worksheet3.set_column('I:I', 20)  # В последнем парсинге
-        worksheet3.set_column('J:J', 15)  # Статус
+        worksheet4 = workbook.add_worksheet('Все магазины')
 
-        # Добавляем фильтр
-        worksheet3.autofilter(0, 0, len(all_shops), len(headers_all) - 1)
-        worksheet3.freeze_panes(1, 0)
+        for col, header in enumerate(headers_all):
+            worksheet4.write(0, col, header, header_format)
 
-        # Добавляем информацию о количестве
-        worksheet3.write(len(all_shops) + 2, 0, f"Всего магазинов в базе: {len(all_shops)}")
+        if all_shops:
+            for row, shop in enumerate(all_shops, 1):
+                source = shop.get('Источник', 'unknown')
 
-        # ========== ВКЛАДКА 4: СТАТИСТИКА ==========
-        worksheet4 = workbook.add_worksheet('Статистика')
+                # Выбираем формат в зависимости от источника
+                if source == 'yandex':
+                    fmt = yandex_format
+                elif source == '2gis':
+                    fmt = gis_format
+                else:
+                    fmt = cell_format
 
-        # Заголовок статистики
-        stats_header_format = workbook.add_format({
-            'bold': True,
-            'font_size': 14,
-            'align': 'center',
-            'valign': 'vcenter'
-        })
+                worksheet4.write(row, 0, row, fmt)
+                worksheet4.write(row, 1, source, fmt)
+                worksheet4.write(row, 2, shop.get('Название магазина', ''), fmt)
+                worksheet4.write(row, 3, shop.get('Адрес', ''), fmt)
+                worksheet4.write(row, 4, shop.get('Телефон', ''), fmt)
 
-        worksheet4.merge_range('A1:C1', 'СТАТИСТИКА ПАРСИНГА', stats_header_format)
+                website = shop.get('Сайт', '')
+                if website:
+                    worksheet4.write_url(row, 5, website, url_format, website)
+                else:
+                    worksheet4.write(row, 5, '', fmt)
 
-        # Данные статистики
+                url = shop.get('Ссылка', '')
+                if url:
+                    worksheet4.write_url(row, 6, url, url_format, url)
+                else:
+                    worksheet4.write(row, 6, '', fmt)
+
+                worksheet4.write(row, 7, shop.get('Дата добавления', ''), fmt)
+                worksheet4.write(row, 8, shop.get('Дата последнего обнаружения', ''), fmt)
+
+                # Внимание: ключ должен быть 'обнаружен_в_последнем_парсинге' (строчная "о")
+                in_last = shop.get('обнаружен_в_последнем_парсинге', False)
+                worksheet4.write(row, 9, 'Да' if in_last else 'Нет', fmt)
+        else:
+            # Если база пуста
+            worksheet4.write(1, 0, 1, empty_format)
+            worksheet4.write(1, 1, 'База пуста', empty_format)
+            worksheet4.merge_range(1, 2, 1, 9, 'База данных магазинов пуста. Запустите парсер для сбора данных.',
+                                   empty_format)
+
+        # Настройка ширины колонок
+        widths = [5, 10, 30, 40, 25, 30, 60, 20, 25, 20]
+        for i, width in enumerate(widths):
+            worksheet4.set_column(i, i, width)
+
+        # ========== ВКЛАДКА 5: СТАТИСТИКА ==========
+        worksheet5 = workbook.add_worksheet('Статистика')
+
+        # Подсчет статистики
+        all_yandex = sum(1 for s in all_shops if s.get('Источник') == 'yandex') if all_shops else 0
+        all_2gis = sum(1 for s in all_shops if s.get('Источник') == '2gis') if all_shops else 0
+
+        # Новые магазины по источникам
+        new_yandex = sum(1 for s in new_shops if s.get('Источник') == 'yandex') if new_shops else 0
+        new_2gis = sum(1 for s in new_shops if s.get('Источник') == '2gis') if new_shops else 0
+
+        # Телефоны и сайты по источникам
+        phones_yandex = sum(1 for s in yandex_shops if s.get('Телефон')) if yandex_shops else 0
+        phones_2gis = sum(1 for s in two_gis_shops if s.get('Телефон')) if two_gis_shops else 0
+
+        sites_yandex = sum(1 for s in yandex_shops if s.get('Сайт')) if yandex_shops else 0
+        sites_2gis = sum(1 for s in two_gis_shops if s.get('Сайт')) if two_gis_shops else 0
+
         stats_data = [
-            ['Показатель', 'Значение'],
-            ['Всего в базе данных', len(all_shops)],
-            ['Спарсено в текущем запуске', len(parsed_shops)],
-            ['Новых магазинов', len(new_shops)],
-            ['Магазинов с телефоном', sum(1 for s in parsed_shops if s.get('Телефон'))],
-            ['Магазинов с сайтом', sum(1 for s in parsed_shops if s.get('Сайт'))],
-            ['', ''],
-            ['Магазинов не найдено в этом парсинге',
-             sum(1 for s in all_shops if not s.get('обнаружен_в_последнем_парсинге', False))],
-            ['Процент покрытия',
-             f"{(len(parsed_shops) / len(all_shops) * 100):.1f}%" if all_shops else "0%"],
-            ['', ''],
-            ['Дата парсинга', parsed_shops[0].get('Дата сбора', '') if parsed_shops else ''],
-            ['Город', 'Ростов-на-Дону']
+            ['Показатель', 'Яндекс', '2GIS', 'Всего'],
+            ['Всего в базе данных', all_yandex, all_2gis, len(all_shops) if all_shops else 0],
+            ['Спарсено в текущем запуске', len(yandex_shops), len(two_gis_shops),
+             len(yandex_shops) + len(two_gis_shops)],
+            ['Новых магазинов', new_yandex, new_2gis, len(new_shops) if new_shops else 0],
+            ['Магазинов с телефоном', phones_yandex, phones_2gis, phones_yandex + phones_2gis],
+            ['Магазинов с сайтом', sites_yandex, sites_2gis, sites_yandex + sites_2gis],
         ]
 
-        for row, (label, value) in enumerate(stats_data, 2):
-            worksheet4.write(row, 0, label)
-            worksheet4.write(row, 1, value)
+        for row, data in enumerate(stats_data):
+            for col, value in enumerate(data):
+                if row == 0:
+                    worksheet5.write(row, col, value, header_format)
+                else:
+                    worksheet5.write(row, col, value)
 
-        # Настраиваем ширину колонок
-        worksheet4.set_column('A:A', 40)
-        worksheet4.set_column('B:B', 25)
+        worksheet5.set_column('A:A', 30)
+        worksheet5.set_column('B:D', 15)
 
-        # Закрываем книгу
+        # Добавляем информацию о запуске
+        info_row = len(stats_data) + 2
+        worksheet5.write(info_row, 0, 'Информация о запуске:')
+        worksheet5.write(info_row + 1, 0, 'Запущенные парсеры:')
+
+        parsers_used = []
+        if yandex_shops:
+            parsers_used.append('Яндекс')
+        if two_gis_shops:
+            parsers_used.append('2GIS')
+
+        if parsers_used:
+            worksheet5.write(info_row + 1, 1, ', '.join(parsers_used))
+        else:
+            worksheet5.write(info_row + 1, 1, 'Нет данных (возможно, только экспорт)')
+
         workbook.close()
-
         return full_path
 
     except Exception as e:
